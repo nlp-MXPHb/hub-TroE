@@ -1,4 +1,5 @@
 """
+train_position_cls_compare.py
 语序信息对比实验 —— "你"在第几位就属于第几类
 
 任务：随机生成含"你"的 5 字句子，"你"在第 pos 位（1-indexed 类别 1~5）
@@ -13,14 +14,13 @@
 
 运行结果对比展示语序信息对 NLP 任务的重要性。
 
+依赖：torch >= 2.0   (pip install torch)
 """
 
+import random
 import torch
 import torch.nn as nn
-import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-import random
-import matplotlib.pyplot as plt
 
 # ─── 超参数 ────────────────────────────────────────────────────────────
 SEED        = 42
@@ -37,59 +37,67 @@ NUM_CLASSES = 5        # "你"的位置：第 1~5 位对应类别 0~4
 random.seed(SEED)
 torch.manual_seed(SEED)
 
-# -------------------- 1. 生成数据集 --------------------
-# 不含"你"的字符池，保证每类样本的字符集完全相同，仅顺序不同
-CHAR_POOL = list("我是他她它很好吗的了一不人大小中上下来去天工和机学会可要产民对能行方说这时那也里后前在有个到出过得子开着道看场面把样关点心然现想起经发理用家意成所事法没如还问话知信重体相东路已手都题自量明实物从当气本打做此进力内平实加回定总数正比老很名高文公战国水青红头问记组特表神教太眼长声府区快技济族早马夜嗯哦呵嘛嘿哎喂")
+# ─── 1. 字符池（不含"你"）──────────────────────────────────────────────
+_RAW = (
+    '的一是了我不人在他有这个上们来到时大地为子中说生国年着'
+    '就那和要她出也得里后自以会家可下而过天去能对小多然于心'
+    '学么之都好看起发当没成只如事把还用第样道想作种开美总从'
+    '无情己面最女但现前些所同日手又行意别信走定回爱进此'
+)
+CHAR_POOL = list(set(ch for ch in _RAW if ch != '你'))
 
-def generate_sample(pos=None):
-    if pos is None:
-        pos = random.randint(0, 4)  # "你"的位置，0~4 对应类别 0~4
-    chars = random.choices(CHAR_POOL, k=5) # 随机生成 5 个字符
-    chars[pos] = "你" # 将 "你" 放在 pos 位
-    return "".join(chars), pos  # "你"在第 pos 位，类别为 pos
 
-def generate_dataset(n:int = N_SAMPLES):
-    samples = [generate_sample() for _ in range(n)]
-    texts, labels = zip(*samples)
-    return list(texts), list(labels)
+# ─── 2. 数据生成 ───────────────────────────────────────────────────────
+def make_sample(pos: int):
+    """生成一条 5 字样本，"你"固定在 pos 位（0-indexed），标签 = pos"""
+    chars = random.choices(CHAR_POOL, k=SEQ_LEN - 1)
+    chars.insert(pos, '你')
+    return ''.join(chars), pos
 
-# -------------------- 2. 构建词表 --------------------
-def build_vocab(chars):
+
+def build_dataset(n: int = N_SAMPLES):
+    per_class = n // NUM_CLASSES
+    data = []
+    for cls in range(NUM_CLASSES):
+        for _ in range(per_class):
+            data.append(make_sample(cls))
+    random.shuffle(data)
+    return data
+
+
+# ─── 3. 词表与编码 ─────────────────────────────────────────────────────
+def build_vocab(data):
     vocab = {'<PAD>': 0, '<UNK>': 1}
-    for ch in chars:
-        if ch not in vocab:
-            vocab[ch] = len(vocab)
+    for sent, _ in data:
+        for ch in sent:
+            if ch not in vocab:
+                vocab[ch] = len(vocab)
     return vocab
-VOCAB = build_vocab(sorted(set("".join(CHAR_POOL))))
 
-# print(f"词表: {VOCAB}")
-# print(VOCAB.get("你"))
-# VOCAB_SIZE = len(VOCAB)
-# NUM_CLASSES = 5
 
-# print(f"词表大小: {len(CHAR_POOL)}")
-# print(f"词表: {VOCAB}")
-# print(VOCAB.get("很"))
+def encode(sent, vocab):
+    ids = [vocab.get(ch, 1) for ch in sent[:SEQ_LEN]]
+    ids += [0] * (SEQ_LEN - len(ids))
+    return ids
 
-def text_to_tensor(text):
-    return torch.tensor([VOCAB.get(ch, 1) for ch in text], dtype=torch.long)
 
-# -------------------- 3. Dataset --------------------
-class CharPositionDataset(Dataset):
-    def __init__(self, texts, labels):
-        self.texts = texts
-        self.labels = labels
+# ─── 4. Dataset ────────────────────────────────────────────────────────
+class PositionDataset(Dataset):
+    def __init__(self, data, vocab):
+        self.X = [encode(s, vocab) for s, _ in data]
+        self.y = [lb for _, lb in data]
 
     def __len__(self):
-        return len(self.texts)
+        return len(self.y)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, i):
         return (
-            text_to_tensor(self.texts[idx]), 
-            torch.tensor(self.labels[idx], dtype=torch.long)
+            torch.tensor(self.X[i], dtype=torch.long),
+            torch.tensor(self.y[i], dtype=torch.long),
         )
 
-# -------------------- 4. 模型定义 --------------------
+
+# ─── 5. 模型定义 ───────────────────────────────────────────────────────
 class RNNModel(nn.Module):
     """
     模型A：Embedding → RNN → MaxPool（沿时序）→ Linear
@@ -98,7 +106,7 @@ class RNNModel(nn.Module):
     "前 t 个字"的上下文；MaxPool 汇聚全局最显著特征，
     但特征本身已携带位置信息。
     """
-    def __init__(self, vocab_size: int): # vocab_size 词表大小
+    def __init__(self, vocab_size: int):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, EMBED_DIM, padding_idx=0)
         self.rnn       = nn.RNN(EMBED_DIM, HIDDEN_DIM, batch_first=True)
@@ -130,30 +138,32 @@ class BagModel(nn.Module):
         pooled = emb.max(dim=1)[0]            # (B, EMBED_DIM)  顺序无关！
         return self.fc(pooled)                # (B, NUM_CLASSES)
 
-# -------------------- 5. 训练与评估 --------------------
+
+# ─── 6. 训练 & 评估工具 ────────────────────────────────────────────────
+def evaluate(model, loader):
+    model.eval()
+    correct = total = 0
+    with torch.no_grad():
+        for X, y in loader:
+            pred    = model(X).argmax(dim=1)
+            correct += (pred == y).sum().item()
+            total   += len(y)
+    return correct / total
+
+
 def evaluate_per_class(model, loader):
     model.eval()
-    correct = [0] * NUM_CLASSES # 每类正确预测数
-    total   = [0] * NUM_CLASSES # 每类样本总数
+    correct = [0] * NUM_CLASSES
+    total   = [0] * NUM_CLASSES
     with torch.no_grad():
         for X, y in loader:
             pred = model(X).argmax(dim=1)
             for cls in range(NUM_CLASSES):
-                mask = (y == cls) # 选出真实标签为 cls 的样本
-                correct[cls] += (pred[mask] == cls).sum().item() # 累积 cls 类的正确预测数
-                total[cls]   += mask.sum().item() # 累积 cls 类的样本总数
+                mask = (y == cls)
+                correct[cls] += (pred[mask] == cls).sum().item()
+                total[cls]   += mask.sum().item()
     return [correct[c] / total[c] if total[c] else 0.0 for c in range(NUM_CLASSES)]
 
-
-def evaluate(model, loader):
-    model.eval()
-    correct, total = 0, 0
-    with torch.no_grad():
-        for x, y in loader:
-            logits = model(x) # 前向传播得到预测结果
-            correct += (logits.argmax(1) == y).sum().item() # 累积正确预测数
-            total += len(y) # 累积样本总数
-    return correct / total
 
 def train_model(model, train_loader, val_loader, name):
     print(f"\n{'='*56}")
@@ -164,7 +174,7 @@ def train_model(model, train_loader, val_loader, name):
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
 
-    for epoch in range(1, EPOCHS + 1): # 训练 EPOCHS 轮
+    for epoch in range(1, EPOCHS + 1):
         model.train()
         total_loss = 0.0
         for X, y in train_loader:
@@ -175,7 +185,7 @@ def train_model(model, train_loader, val_loader, name):
             optimizer.step()
             total_loss += loss.item()
 
-        if epoch % 4 == 0 or epoch == 1: # 每 4 轮评估一次
+        if epoch % 4 == 0 or epoch == 1:
             avg_loss = total_loss / len(train_loader)
             val_acc  = evaluate(model, val_loader)
             print(f"  Epoch {epoch:2d}/{EPOCHS}  loss={avg_loss:.4f}  val_acc={val_acc:.4f}")
@@ -184,35 +194,29 @@ def train_model(model, train_loader, val_loader, name):
     print(f"  最终验证准确率：{final_acc:.4f}")
     return final_acc, model
 
-# -------------------- 6. 主流程 --------------------
+
+# ─── 7. 主流程 ─────────────────────────────────────────────────────────
 def main():
-    random.seed(42)
-    torch.manual_seed(42)
+    print("─── 数据集准备 ────────────────────────────────────────────────")
+    data  = build_dataset(N_SAMPLES)
+    vocab = build_vocab(data)
+    print(f"  总样本：{len(data)}，每类 {len(data)//NUM_CLASSES} 条")
+    print(f"  词表大小：{len(vocab)}")
+    print(f'  任务：预测「你」在 5 字句子中的位置（第 1~5 位，{NUM_CLASSES} 分类）')
+    print(f"  随机猜测基准准确率：{1/NUM_CLASSES:.0%}")
 
-    train_texts, train_labels = generate_dataset(8000)
-    test_texts, test_labels = generate_dataset(2000)
-
-    train_dataset = CharPositionDataset(train_texts, train_labels)
-    test_dataset = CharPositionDataset(test_texts, test_labels)
-
-    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
-
-    print("\n样例数据:")
-    for i in range(6):
-        print(f"  文本: '{train_texts[i]}' -> 类别: {train_labels[i]}")
-
-    EMBED_DIM = 32
-    HIDDEN_DIM = 64
-    EPOCHS = 30
-    LR = 0.001
+    split        = int(len(data) * TRAIN_RATIO)
+    train_loader = DataLoader(
+        PositionDataset(data[:split], vocab), batch_size=BATCH_SIZE, shuffle=True)
+    val_loader   = DataLoader(
+        PositionDataset(data[split:], vocab),  batch_size=BATCH_SIZE)
 
     rnn_acc, rnn_model = train_model(
-        RNNModel(len(VOCAB)), train_loader, test_loader,
+        RNNModel(len(vocab)), train_loader, val_loader,
         "模型A — RNN + MaxPool（保留语序）"
     )
     bow_acc, bow_model = train_model(
-        BagModel(len(VOCAB)), train_loader, test_loader,
+        BagModel(len(vocab)), train_loader, val_loader,
         "模型B — 直接 Embedding MaxPool（无 RNN，丢失语序）"
     )
 
@@ -224,8 +228,8 @@ def main():
     print(f"  模型B（直接 Embedding MaxPool）  val_acc = {bow_acc:.4f}")
 
     # ─── 逐类准确率 ────────────────────────────────────────────────────
-    rnn_per_cls = evaluate_per_class(rnn_model, test_loader)
-    bow_per_cls = evaluate_per_class(bow_model, test_loader)
+    rnn_per_cls = evaluate_per_class(rnn_model, val_loader)
+    bow_per_cls = evaluate_per_class(bow_model, val_loader)
     print('\n  各位置准确率（「你」在第 X 位）：')
     print(f"  {'位置':>6}  {'模型A(RNN)':>12}  {'模型B(BoW)':>12}")
     for i in range(NUM_CLASSES):
@@ -252,9 +256,8 @@ def main():
     print(f"  {'句子':>6}  真实位置  模型A(RNN)  模型B(BoW)")
     with torch.no_grad():
         for pos in range(NUM_CLASSES):
-            sent, label = generate_sample(pos)
-            # ids         = torch.tensor([encode(sent, vocab)], dtype=torch.long)
-            ids         = text_to_tensor(sent).unsqueeze(0)  # 添加 batch 维度
+            sent, label = make_sample(pos)
+            ids         = torch.tensor([encode(sent, vocab)], dtype=torch.long)
             rnn_pred    = rnn_model(ids).argmax(dim=1).item()
             bow_pred    = bow_model(ids).argmax(dim=1).item()
             rnn_mark    = '✓' if rnn_pred == label else '✗'
@@ -264,5 +267,5 @@ def main():
                   f"{bow_mark} 第{bow_pred+1}位")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
