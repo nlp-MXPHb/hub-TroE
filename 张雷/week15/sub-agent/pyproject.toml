@@ -1,0 +1,18 @@
+[project]
+name = "hydra-research-agent"
+version = "0.1.0"
+description = "Parallel multi-subagent research agent (single-machine, I/O-bound)"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.0",   # OpenAI-compatible client (DeepSeek/DashScope). Lazy-imported; tests use fakes.
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+# Flat src/ layout; tests import bare module names (config, models, ...).
+# conftest.py at repo root inserts src/ onto sys.path.
