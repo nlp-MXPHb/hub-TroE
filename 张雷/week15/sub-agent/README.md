@@ -53,6 +53,18 @@ export DEEPSEEK_API_KEY=sk-...  # 或 DASHSCOPE_API_KEY
 python src/cli.py "对比 React、Vue 和 Svelte 在 2026 年看板项目中的适用性"
 ```
 
+## Web 控制台
+
+除 CLI 外提供可视化控制台（设计见 [`specs/002-web-console/design.md`](specs/002-web-console/design.md)）：实时拓扑（排队/运行/完成/失败四态）、**粗粒度状态流**（FR-007：不泄露内部推理）、部分失败披露、一键取消、并行加速统计、按 Trace_ID 过滤的运维日志抽屉。
+
+```bash
+pip install -e ".[web]"        # fastapi / uvicorn / httpx
+uvicorn server:app --port 8002 --app-dir src
+# 浏览器打开 http://localhost:8002
+```
+
+SSE 事件契约（全部事件带 `trace_id`）：`start / routed / subtask_started / subtask_completed(含duration) / subtask_failed / dependency_rejected / result / done / error`。取消：`POST /cancel/{trace_id}`；运维日志：`GET /logs/{trace_id}`。
+
 ## 使用示例
 
 ```bash
@@ -109,6 +121,7 @@ MainAgent (ReAct) ──web_search──> 直接回答（简单查询）
 sub-agent/
 ├── src/
 │   ├── cli.py                    # CLI 入口
+│   ├── server.py                 # Web 控制台（FastAPI + SSE + 取消 + 日志）
 │   ├── config.py                 # 集中配置（全部阈值可调）
 │   ├── main_agent.py             # 主控 ReAct 循环 + LLM 自主路由
 │   ├── llm_client.py             # OpenAI 兼容客户端（懒加载）
@@ -120,12 +133,16 @@ sub-agent/
 │   └── tools/
 │       ├── web_search.py         # 搜索工具（主/子 agent 共用，后端可插拔）
 │       └── dispatch_subagents.py # 并行派发工具（仅主 agent）
-├── tests/                        # unit / contract / integration（注入 FakeLLM，无需 API key）
-└── specs/001-parallel-subagent-orchestration/
-    ├── spec.md                   # 17 条功能需求 · 8 条成功标准 · 4 个用户故事
-    ├── plan.md · tasks.md        # 实施计划 · 任务清单（30/30 完成）
-    ├── research.md · data-model.md
-    └── contracts/tools.md        # 工具契约
+├── static/                       # 前端页面（零依赖：原生 JS + SVG 拓扑）
+├── tests/                        # unit / contract / integration / web（注入 FakeLLM，无需 API key）
+└── specs/
+    ├── 001-parallel-subagent-orchestration/
+    │   ├── spec.md               # 17 条功能需求 · 8 条成功标准 · 4 个用户故事
+    │   ├── plan.md · tasks.md    # 实施计划 · 任务清单（30/30 完成）
+    │   ├── research.md · data-model.md
+    │   └── contracts/tools.md    # 工具契约
+    └── 002-web-console/
+        └── design.md             # Web 前端设计（事件契约 · 页面设计 · 验收）
 ```
 
 ## 测试

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Hydra · 并行多 Subagent 调研控制台</title>
+<style>
+  :root {
+    --bg:#060912; --panel:rgba(20,30,55,0.55);
+    --border:rgba(0,212,255,0.18); --cyan:#00d4ff; --blue:#4f8cff;
+    --orange:#ffb020; --green:#2ee6a0; --red:#ff5c7a;
+    --text:#d6e2f5; --muted:#7a8db5;
+  }
+  * { box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei",Calibri,sans-serif; margin:0; color:var(--text);
+         background:linear-gradient(135deg,#060912 0%,#0a1228 50%,#060912 100%);
+         min-height:100vh; }
+  .wrap { max-width:1300px; margin:0 auto; padding:16px; }
+  h1 { margin:0 0 2px; font-size:22px; font-weight:700;
+       background:linear-gradient(90deg,#00d4ff,#4f8cff,#b4a0ff);
+       -webkit-background-clip:text; -webkit-text-fill-color:transparent; letter-spacing:.5px; }
+  .sub { color:var(--muted); font-size:12px; margin-bottom:12px; }
+  .trace { float:right; font-size:11px; color:var(--muted); font-family:Consolas,monospace;
+           border:1px solid var(--border); border-radius:6px; padding:2px 8px; }
+  .trace b { color:var(--cyan); }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:10px;
+          padding:14px; margin-bottom:12px; backdrop-filter:blur(6px);
+          box-shadow:0 0 24px rgba(0,120,200,0.05) inset, 0 4px 18px rgba(0,0,0,.35); }
+  textarea { width:100%; border:1px solid var(--border); border-radius:7px; padding:10px;
+            font-size:14px; background:rgba(8,14,30,0.7); color:var(--text); }
+  textarea:focus { outline:none; border-color:var(--cyan); box-shadow:0 0 0 2px rgba(0,212,255,.15); }
+  .ctrl { display:flex; align-items:center; gap:8px; margin-top:8px; flex-wrap:wrap; }
+  button { background:linear-gradient(135deg,#1b3a7a,#2a5cd6); color:#fff; border:none;
+           border-radius:6px; padding:7px 15px; cursor:pointer; font-size:13px;
+           box-shadow:0 0 12px rgba(79,140,255,.25); transition:.2s; }
+  button:hover { box-shadow:0 0 18px rgba(0,212,255,.5); transform:translateY(-1px); }
+  button:disabled { background:#2a3354; box-shadow:none; cursor:default; opacity:.6; }
+  #cancel { background:linear-gradient(135deg,#7a1b2e,#d62a4a); box-shadow:0 0 12px rgba(255,92,122,.25); }
+  .ex { background:rgba(20,40,80,.6); border:1px solid var(--border); color:var(--cyan); box-shadow:none; }
+  .ex:hover { background:rgba(0,90,140,.4); }
+  .spinner { width:14px; height:14px; border:2px solid rgba(0,212,255,.2);
+             border-top:var(--cyan); border-radius:50%; animation:spin .8s linear infinite; display:none; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .mode { font-size:11px; padding:2px 9px; border-radius:10px; margin-left:8px;
+          background:rgba(0,212,255,.12); color:var(--cyan); display:none; }
+  .grid { display:grid; grid-template-columns: 400px 1fr; gap:12px; }
+  .nodesel { font-size:11px; color:var(--muted); margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+  .nodebtn { font-size:11px; padding:3px 9px; margin:2px; border-radius:10px;
+             background:rgba(30,50,90,.5); color:var(--text); border:1px solid transparent; cursor:pointer; }
+  .nodebtn.on { background:linear-gradient(135deg,#00d4ff,#4f8cff); color:#06122a; font-weight:700;
+                box-shadow:0 0 10px rgba(0,212,255,.5); }
+  .feed { max-height:560px; overflow-y:auto; padding-right:4px; }
+  .feed::-webkit-scrollbar { width:6px; }
+  .feed::-webkit-scrollbar-thumb { background:rgba(0,212,255,.3); border-radius:3px; }
+  .ev { border-left:3px solid var(--blue); background:rgba(10,18,40,.6);
+        margin:6px 0; padding:7px 11px; border-radius:4px; font-size:12px; }
+  .ev.main { border-left-color:var(--cyan); }
+  .ev .nbadge { display:inline-block; font-size:9px; padding:1px 7px; border-radius:8px;
+                 background:rgba(0,212,255,.15); color:var(--cyan); margin-right:6px; }
+  .ev.sub .nbadge { background:rgba(79,140,255,.18); color:var(--blue); }
+  .ev .ts { color:#5d6f96; font-family:Consolas,monospace; font-size:10px; margin-left:6px; }
+  .ev.ok { color:var(--green); font-weight:700; }
+  .ev.fail { color:var(--red); }
+  .ev .err { color:var(--red); word-break:break-all; margin-top:2px; }
+  .ans { font-size:14px; line-height:1.75; white-space:pre-wrap; }
+  .disclose { color:var(--orange); border-left:3px solid var(--orange); padding:4px 10px;
+              margin-bottom:8px; background:rgba(255,176,32,.07); border-radius:4px; font-size:12px; }
+  .stats { font-size:12px; color:var(--green); margin-top:8px; padding:6px 10px;
+           background:rgba(46,230,160,.08); border-radius:5px; border:1px solid rgba(46,230,160,.2); display:none; }
+  .status-tag { font-size:10px; padding:1px 7px; border-radius:8px; margin-left:6px; }
+  .status-running { background:rgba(255,176,32,.18); color:var(--orange); }
+  .status-done { background:rgba(46,230,160,.18); color:var(--green); }
+  .status-failed { background:rgba(255,92,122,.18); color:var(--red); }
+  .drawer { cursor:pointer; color:var(--muted); font-size:12px; user-select:none; }
+  .drawer b { color:var(--cyan); }
+  .logbox { display:none; margin-top:8px; max-height:300px; overflow-y:auto;
+            background:rgba(4,8,20,.7); border:1px solid var(--border); border-radius:6px;
+            padding:8px; font-family:Consolas,monospace; font-size:11px; color:#9fb4e0;
+            white-space:pre-wrap; word-break:break-all; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="trace">Trace: <b id="traceId">—</b></div>
+  <h1>▮ Hydra · 并行多 Subagent 调研控制台</h1>
+  <div class="sub">主 agent 自主路由 · 粗粒度状态流（FR-007）· 部分失败容错 · 可取消</div>
+
+  <div class="card">
+    <textarea id="q" rows="2">对比 React、Vue 和 Svelte 在 2026 年看板项目中的适用性</textarea>
+    <div class="ctrl">
+      <button id="ask" onclick="ask()">▶ 开始调研</button>
+      <button id="cancel" onclick="cancelRun()" disabled>⏹ 取消</button>
+      <div id="spin" class="spinner"></div>
+      <span id="mode" class="mode"></span>
+      <span style="font-size:12px;color:var(--muted)">示例：</span>
+      <button class="ex" onclick="fill('对比 React、Vue 和 Svelte 在 2026 年看板项目中的适用性')">框架对比</button>
+      <button class="ex" onclick="fill('调研 2026 年企业级看板工具：Jira、Trello、Asana 的定价与功能')">看板工具</button>
+      <button class="ex" onclick="fill('2024年比亚迪销量是多少')">单事实(不派发)</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin:0 0 8px;font-size:14px;color:var(--cyan)">◆ 任务拓扑</h3>
+      <div id="topo"></div>
+      <div class="stats" id="stats"></div>
+    </div>
+    <div class="card">
+      <div class="nodesel" id="nodesel"></div>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin:0 0 8px;font-size:14px;color:var(--cyan)">◆ 最终调研报告</h3>
+    <div id="ans" class="ans">（执行后显示）</div>
+  </div>
+
+  <div class="card">
+    <div class="drawer" onclick="toggleLogs()">▸ <b>运维日志</b>（默认折叠 · 按 Trace_ID 过滤 · 含内部推理，仅运维可见）</div>
+    <div class="logbox" id="logbox"></div>
+  </div>
+</div>
+
+<script src="/static/viz/topology.js"></script>
+<script>
+let topo = null;
+let events = [];           // 有序粗粒度事件流
+let nodeMeta = {};         // {id: {topic, status}}
+let currentNode = 'all';
+let autoFollow = true;
+let curTrace = null;
+let t0 = null;
+let durations = {};        // {subId: seconds}
+let startedIds = [];
+
+function fill(q) { document.getElementById('q').value = q; }
+
+async function ask() {
+  const q = document.getElementById('q').value.trim();
+  if (!q) return;
+  document.getElementById('ask').disabled = true;
+  document.getElementById('cancel').disabled = false;
+  document.getElementById('spin').style.display = 'inline-block';
+  document.getElementById('ans').textContent = '（调研中…）';
+  document.getElementById('stats').style.display = 'none';
+  document.getElementById('mode').style.display = 'none';
+  document.getElementById('traceId').textContent = '—';
+  // 整体重置
+  events = []; nodeMeta = {}; durations = {}; startedIds = [];
+  currentNode = 'all'; autoFollow = true;
+  topo = new TopoViz(document.getElementById('topo'));
+  topo.setMain();
+  topo.onClick(id => selectNode(id));
+  nodeMeta['main'] = { topic: '主 agent', status: 'idle' };
+  refreshNodeSel();
+  renderFeed();
+
+  try {
+    const resp = await fetch('/query', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({question: q}) });
+    const reader = resp.body.getReader(); const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const lines = buf.split('\n\n'); buf = lines.pop();
+      for (const ln of lines) {
+        if (!ln.startsWith('data:')) continue;
+        handleEvent(JSON.parse(ln.slice(5).trim()));
+      }
+    }
+  } catch (e) {
+    addEvent('main', {type:'error', message:String(e)});
+  } finally {
+    document.getElementById('ask').disabled = false;
+    document.getElementById('cancel').disabled = true;
+    document.getElementById('spin').style.display = 'none';
+  }
+}
+
+async function cancelRun() {
+  if (!curTrace) return;
+  document.getElementById('cancel').disabled = true;
+  await fetch('/cancel/' + curTrace, { method: 'POST' });
+  addEvent('main', {type:'cancel_requested'});
+}
+
+function handleEvent(ev) {
+  if (ev.type === 'start') {
+    curTrace = ev.trace_id; t0 = performance.now();
+    document.getElementById('traceId').textContent = curTrace.slice(0, 12) + '…';
+    addEvent('main', {type:'start', question:ev.question});
+  } else if (ev.type === 'routed') {
+    const mode = document.getElementById('mode');
+    if (ev.mode === 'dispatch') {
+      mode.textContent = `路由：并行派发 ${ev.sub_queries.length} 个子任务`;
+      ev.sub_queries.forEach(s => {
+        startedIds.push(s.sub_query_id);
+        nodeMeta[s.sub_query_id] = { topic: s.sub_query, status:'queued' };
+        topo.addSubagent(s.sub_query_id, s.sub_query);
+      });
+      refreshNodeSel();
+    } else {
+      mode.textContent = '路由：直接搜索（不派发）';
+    }
+    mode.style.display = 'inline-block';
+    addEvent('main', {type:'routed', mode:ev.mode});
+  } else if (ev.type === 'subtask_started') {
+    nodeMeta[ev.sub_query_id] = nodeMeta[ev.sub_query_id] || { topic: ev.sub_query_id, status:'running' };
+    nodeMeta[ev.sub_query_id].status = 'running';
+    topo.markRunning(ev.sub_query_id);
+    refreshNodeSel();
+    addEvent(ev.sub_query_id, {type:'subtask_started'});
+  } else if (ev.type === 'subtask_completed') {
+    durations[ev.sub_query_id] = ev.duration || 0;
+    nodeMeta[ev.sub_query_id].status = 'done';
+    topo.markDone(ev.sub_query_id);
+    refreshNodeSel();
+    addEvent(ev.sub_query_id, {type:'subtask_completed', duration:ev.duration});
+  } else if (ev.type === 'subtask_failed') {
+    nodeMeta[ev.sub_query_id] = nodeMeta[ev.sub_query_id] || { topic: ev.sub_query_id, status:'failed' };
+    nodeMeta[ev.sub_query_id].status = 'failed';
+    topo.markFailed(ev.sub_query_id);
+    refreshNodeSel();
+    addEvent(ev.sub_query_id, {type:'subtask_failed', error:ev.error});
+  } else if (ev.type === 'dependency_rejected') {
+    addEvent('main', {type:'dependency_rejected', message:ev.message});
+  } else if (ev.type === 'result') {
+    renderResult(ev);
+  } else if (ev.type === 'error') {
+    addEvent('main', {type:'error', message:ev.message});
+  } else if (ev.type === 'done') {
+    if (nodeMeta['main']) { nodeMeta['main'].status = 'done'; refreshNodeSel(); }
+    addEvent('main', {type:'done'});
+  }
+}
+
+function renderResult(ev) {
+  const box = document.getElementById('ans');
+  let html = '';
+  if (ev.partial && ev.failures && ev.failures.length) {
+    const names = ev.failures.map(f => f.task_id).join(', ');
+    html += `<div class="disclose">⚠ 以下结果基于部分子任务生成，另有 ${ev.failures.length} 项任务失败：${names}</div>`;
+  } else if (ev.answer && ev.answer.startsWith('全部子任务失败')) {
+    html += `<div class="disclose" style="color:var(--red);border-color:var(--red)">${ev.answer}</div>`;
+  }
+  html += ev.answer || '（无答案）';
+  box.innerHTML = html;
+
+  if (startedIds.length && t0 !== null) {
+    const wall = ((performance.now() - t0) / 1000).toFixed(1);
+    const serial = Object.values(durations).reduce((a, b) => a + b, 0).toFixed(1);
+    const nDone = Object.keys(durations).length;
+    const nFail = startedIds.length - nDone;
+    const s = document.getElementById('stats');
+    let sp = '';
+    if (nDone >= 2 && wall > 0) sp = ` · 加速 <b style="color:var(--cyan)">${(serial / wall).toFixed(2)}×</b>`;
+    s.innerHTML = `⚡ 并行：${startedIds.length} 子任务 · 墙钟 <b style="color:var(--cyan)">${wall}s</b>`
+      + ` · 成功 ${nDone} / 失败 ${nFail} · 串行和 ${serial}s${sp}`;
+    s.style.display = 'block';
+  }
+}
+
+/* ── 状态流（粗粒度） ───────────────────────────── */
+function addEvent(node, ev) {
+  const ts = new Date().toLocaleTimeString('zh-CN', {hour12:false});
+  events.push({ node, ev, ts });
+  renderFeed();
+}
+
+function renderFeed() {
+  const box = document.getElementById('feed');
+  const steps = currentNode === 'all' ? events : events.filter(e => e.node === currentNode);
+  let html = '';
+  steps.forEach(({node, ev, ts}) => {
+    const isMain = node === 'main';
+    const lbl = isMain ? '主agent' : ((nodeMeta[node]?.topic || node) + '').slice(0, 12);
+    const cls = isMain ? 'ev main' : 'ev sub';
+    let body = '';
+    if (ev.type === 'start') body = `⊙ 请求开始：${ev.question.slice(0, 40)}`;
+    else if (ev.type === 'routed') body = ev.mode === 'dispatch' ? '⊙ 路由：dispatch_subagents（并行派发）' : '⊙ 路由：web_search（直接搜索）';
+    else if (ev.type === 'subtask_started') body = '▶ 子任务开始';
+    else if (ev.type === 'subtask_completed') body = `<span class="ok">✓ 完成</span> (${ev.duration}s)`;
+    else if (ev.type === 'subtask_failed') body = `<span class="fail">✗ 失败</span><div class="err">${ev.error || ''}</div>`;
+    else if (ev.type === 'dependency_rejected') body = `<span class="fail">✗ 分解被拒（存在依赖）</span><div class="err">${ev.message || ''}</div>`;
+    else if (ev.type === 'cancel_requested') body = '⏹ 已请求取消…';
+    else if (ev.type === 'done') body = '<span class="ok">✓ 结束</span>';
+    else if (ev.type === 'error') body = `<span class="fail">✗ 错误</span><div class="err">${ev.message || ''}</div>`;
+    html += `<div class="${cls}"><span class="nbadge">${lbl}</span>${body}<span class="ts">${ts}</span></div>`;
+  });
+  if (!html) html = '<div style="color:var(--muted);font-size:12px;padding:8px">等待事件流…（点左侧节点可只看该节点）</div>';
+  box.innerHTML = html;
+  if (autoFollow) box.scrollTop = box.scrollHeight;
+}
+
+function selectNode(id) {
+  currentNode = id; autoFollow = (id === 'all');
+  refreshNodeSel(); renderFeed();
+}
+
+function refreshNodeSel() {
+  const sel = document.getElementById('nodesel');
+  let html = '<span style="opacity:.6">节点：</span>';
+  html += `<button class="nodebtn${currentNode==='all'?' on':''}" onclick="selectNode('all')">全部实时流</button>`;
+  ['main', ...startedIds].forEach(id => {
+    const m = nodeMeta[id] || {};
+    const tag = m.status === 'done' ? '<span class="status-tag status-done">done</span>'
+              : m.status === 'running' ? '<span class="status-tag status-running">run</span>'
+              : m.status === 'failed' ? '<span class="status-tag status-failed">fail</span>' : '';
+    const lbl = id === 'main' ? '主agent' : (m.topic || id).slice(0, 10);
+    html += `<button class="nodebtn${currentNode===id?' on':''}" onclick="selectNode('${id}')">${lbl}${tag}</button>`;
+  });
+  sel.innerHTML = html;
+}
+
+/* ── 运维抽屉（US3，默认折叠） ─────────────────── */
+async function toggleLogs() {
+  const box = document.getElementById('logbox');
+  if (box.style.display === 'block') { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  if (!curTrace) { box.textContent = '尚无 Trace_ID（先执行一次调研）。'; return; }
+  box.textContent = '加载中…';
+  try {
+    const r = await fetch('/logs/' + curTrace);
+    const d = await r.json();
+    box.textContent = d.lines.length ? d.lines.join('\n') : '（该 Trace_ID 暂无日志行）';
+  } catch (e) {
+    box.textContent = '日志加载失败：' + e;
+  }
+}
+</script>
+</body>
+</html>

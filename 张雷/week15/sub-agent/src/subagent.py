@@ -11,10 +11,10 @@ from observability import log_event
 from tools.web_search import web_search
 
 SYSTEM_PROMPT = (
-    "You are a research subagent. Investigate the sub-query using web_search, "
-    "then return a final answer. Each step respond with JSON: "
-    '{"thought": str, "action": {"tool": "web_search"|"final", "query": str|"answer": str}}. '
-    "When you have enough information, set tool='final' with the answer text."
+    "你是一个研究型子智能体。请使用 web_search 工具调查给定的子查询内容，"
+    "并最终返回答案。在每一步响应中，你都必须以 JSON 格式输出："
+    '{"thought": "思考内容", "action": {"tool": "web_search" 或 "final", "query": "搜索关键词" 或 "answer": "答案文本"}}。'
+    "当你收集到足够的信息后，请将 tool 设置为 'final'，并在 answer 字段中附上最终答案。"
 )
 
 
